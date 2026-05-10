@@ -1,0 +1,22 @@
+{
+  "clusters": [
+    {
+      "name": "cluster-a",
+      "context": "kind-dag-a",
+      "namespace": "default",
+      "capacity": {
+        "cpu": 4,
+        "memoryMiB": 4096
+      }
+    },
+    {
+      "name": "cluster-b",
+      "context": "kind-dag-b",
+      "namespace": "default",
+      "capacity": {
+        "cpu": 8,
+        "memoryMiB": 8192
+      }
+    }
+  ]
+}

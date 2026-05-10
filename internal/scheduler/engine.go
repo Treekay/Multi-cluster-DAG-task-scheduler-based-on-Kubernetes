@@ -86,24 +86,7 @@ func (e *Engine) Run(ctx context.Context, workflow Workflow) (WorkflowResult, er
 }
 
 func (e *Engine) selectCluster(required Resources) (int, error) {
-	bestIndex := -1
-	bestFreeCPU := -1
-
-	for i, state := range e.clusters {
-		free := state.cluster.Capacity.Sub(state.used)
-		if !free.Fits(required) {
-			continue
-		}
-		if free.CPU > bestFreeCPU {
-			bestIndex = i
-			bestFreeCPU = free.CPU
-		}
-	}
-
-	if bestIndex == -1 {
-		return 0, fmt.Errorf("no cluster has enough free resources")
-	}
-	return bestIndex, nil
+	return selectCluster(e.clusters, required)
 }
 
 func (e *Engine) reserve(clusterIndex int, resources Resources) {

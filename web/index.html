@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DAG Scheduler Console</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>DAG Scheduler Console</h1>
+            <p id="workflowName">Loading workflow</p>
+          </div>
+          <div class="actions">
+            <button id="resetBtn" type="button">Reset</button>
+            <button id="runBtn" type="button">Run Simulation</button>
+          </div>
+        </header>
+
+        <section class="canvas-panel" aria-label="DAG visualization">
+          <svg id="dagCanvas" viewBox="0 0 1000 560" role="img" aria-label="Workflow DAG"></svg>
+        </section>
+
+        <section class="clusters-panel" aria-label="Cluster resource usage">
+          <div class="panel-title">
+            <h2>Clusters</h2>
+            <span id="stepLabel">Step 0</span>
+          </div>
+          <div id="clusters" class="cluster-grid"></div>
+        </section>
+      </section>
+
+      <aside class="side">
+        <section class="panel">
+          <div class="panel-title">
+            <h2>Event Stream</h2>
+            <span id="eventCount">0 events</span>
+          </div>
+          <ol id="events" class="events"></ol>
+        </section>
+
+        <section class="panel editor-panel">
+          <div class="panel-title">
+            <h2>Workflow JSON</h2>
+            <button id="simulateJsonBtn" type="button">Apply</button>
+          </div>
+          <textarea id="workflowEditor" spellcheck="false"></textarea>
+        </section>
+      </aside>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

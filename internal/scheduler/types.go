@@ -31,14 +31,17 @@ type TaskSpec struct {
 }
 
 type Cluster struct {
-	Name     string
-	Capacity Resources
+	Name      string    `json:"name"`
+	Context   string    `json:"context"`
+	Namespace string    `json:"namespace"`
+	Capacity  Resources `json:"capacity"`
 }
 
 type TaskStatus string
 
 const (
 	TaskPending   TaskStatus = "Pending"
+	TaskReady     TaskStatus = "Ready"
 	TaskRunning   TaskStatus = "Running"
 	TaskSucceeded TaskStatus = "Succeeded"
 	TaskFailed    TaskStatus = "Failed"
