@@ -1,3 +1,4 @@
 .gocache/
 bin/
 *.exe
+config/clusters.json

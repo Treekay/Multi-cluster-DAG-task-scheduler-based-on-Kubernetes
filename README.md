@@ -73,9 +73,12 @@ Simulation` stays local and does not touch Kubernetes. `Run Kubernetes` submits
 each DAG task as a real Kubernetes `Job` that runs a lightweight `busybox`
 command.
 
-Run the visualization console with Docker:
+Run the visualization console with Docker against real clusters:
 
 ```powershell
+New-Item -ItemType Directory -Force config
+Copy-Item examples/clusters.example.json config/clusters.json
+# Edit config/clusters.json so each context matches your kubeconfig.
 docker compose up --build
 ```
 
@@ -83,9 +86,15 @@ Then open [http://127.0.0.1:8080](http://127.0.0.1:8080). The container runs
 one Go server that serves both the API and the frontend assets.
 
 Make sure Docker Desktop is running before using Docker Compose. This container
-starts the local visualization and simulation UI. It also includes `kubectl` and
-mounts your local kubeconfig so the `Run Kubernetes` button can submit Jobs to
-the contexts listed in `examples/clusters.json`.
+starts the local visualization and simulation UI. It includes `kubectl`, mounts
+your kubeconfig, and reads cluster metadata from `config/clusters.json`.
+
+Use a non-default kubeconfig path if needed:
+
+```powershell
+$env:KUBECONFIG_DIR = "C:\path\to\directory-containing-config"
+docker compose up --build
+```
 
 Demo workflows live in:
 
@@ -104,6 +113,12 @@ kind create cluster --name dag-b
 kubectl config get-contexts
 ```
 
+Start the Docker demo with the kind-specific compose override:
+
+```powershell
+docker compose -f docker-compose.yml -f docker-compose.kind.yml up --build
+```
+
 The example cluster config expects these kubeconfig contexts:
 
 - `kind-dag-a`
@@ -112,3 +127,73 @@ The example cluster config expects these kubeconfig contexts:
 Each workflow task is converted to a Kubernetes `batch/v1 Job`. The scheduler
 selects a cluster using the configured logical capacity, applies the Job with
 `kubectl`, waits for completion, and then deletes the Job.
+
+## Real Cluster Setup
+
+To use the scheduler with someone else's Kubernetes clusters:
+
+1. Make sure their kubeconfig contains one context per target cluster.
+2. Copy `examples/clusters.example.json` to `config/clusters.json`.
+3. Set each `context` value to an actual kubeconfig context.
+4. Set `namespace` to the namespace where workflow Jobs should run.
+5. Create that namespace in every target cluster.
+6. Grant the kubeconfig identity permission to manage Jobs and read Pods.
+
+Minimum namespace-scoped RBAC:
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dag-jobs
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dag-scheduler-job-runner
+  namespace: dag-jobs
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dag-scheduler-job-runner
+  namespace: dag-jobs
+subjects:
+  - kind: User
+    name: replace-with-your-kubeconfig-user
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: Role
+  name: dag-scheduler-job-runner
+  apiGroup: rbac.authorization.k8s.io
+```
+
+Before opening the UI, check access from the same kubeconfig:
+
+```powershell
+kubectl --context your-prod-east-context -n dag-jobs auth can-i create jobs
+kubectl --context your-prod-east-context -n dag-jobs auth can-i get pods
+```
+
+Then run:
+
+```powershell
+docker compose up --build
+```
+
+`Run Simulation` never touches Kubernetes. `Run Kubernetes` submits real Jobs to
+the configured contexts and namespaces.
+
+## Notes For Production
+
+This project currently runs as a local control-plane UI that shells out to
+`kubectl`. For a production deployment, the next step is to add a Helm chart and
+an in-cluster mode that uses a Kubernetes ServiceAccount instead of mounting a
+developer kubeconfig.
