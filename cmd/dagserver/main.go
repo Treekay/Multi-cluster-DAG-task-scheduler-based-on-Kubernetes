@@ -112,7 +112,14 @@ func kubernetesRunHandler(taskTimeout time.Duration) http.HandlerFunc {
 		ctx, cancel := context.WithTimeout(r.Context(), workflowTimeout)
 		defer cancel()
 
-		result, err := scheduler.ExecuteWorkflow(ctx, request.Workflow, request.Clusters, scheduler.NewKubernetesExecutor(taskTimeout))
+		inspector := scheduler.NewKubernetesResourceInspector()
+		clusters, err := inspector.InspectClusterResources(ctx, request.Clusters)
+		if err != nil {
+			writeError(w, fmt.Errorf("inspect Kubernetes resources: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		result, err := scheduler.ExecuteWorkflow(ctx, request.Workflow, clusters, scheduler.NewKubernetesExecutor(taskTimeout))
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)

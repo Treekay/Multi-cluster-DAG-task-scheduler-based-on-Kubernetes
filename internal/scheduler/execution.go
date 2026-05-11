@@ -19,6 +19,7 @@ type ExecutionResult struct {
 }
 
 func ExecuteWorkflow(ctx context.Context, workflow Workflow, clusters []Cluster, executor Executor) (ExecutionResult, error) {
+	workflow = NormalizeWorkflowCosts(workflow)
 	g, err := buildGraph(workflow)
 	if err != nil {
 		return ExecutionResult{}, err
@@ -53,44 +54,70 @@ func ExecuteWorkflow(ctx context.Context, workflow Workflow, clusters []Cluster,
 		steps = append(steps, buildSimulationStep(len(steps), "ready", fmt.Sprintf("%s is ready to run.", taskName), taskName, "", workflow, taskViews, states, ready))
 	}
 
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	completed := 0
-	for len(ready) > 0 {
-		sort.Strings(ready)
-		taskName := ready[0]
-		ready = ready[1:]
-		task := g.tasks[taskName]
+	running := 0
+	results := make(chan taskExecutionResult, len(workflow.Tasks))
 
-		clusterIndex, err := selectCluster(states, task.Resources)
-		if err != nil {
-			return executionFailure(workflow, clusters, steps, err)
-		}
+	for completed < len(workflow.Tasks) {
+		ready = sortReadyByCost(ready, g.tasks)
+		scheduled := false
+		blocked := ready[:0]
+		for _, taskName := range ready {
+			task := g.tasks[taskName]
+			clusterIndex, err := selectCluster(states, task.Resources)
+			if err != nil {
+				blocked = append(blocked, taskName)
+				continue
+			}
 
-		states[clusterIndex].used = states[clusterIndex].used.Add(task.Resources)
-		cluster := states[clusterIndex].cluster
-		view := taskViews[taskName]
-		view.Status = TaskRunning
-		view.Cluster = cluster.Name
-		taskViews[taskName] = view
-		steps = append(steps, buildSimulationStep(len(steps), "scheduled", fmt.Sprintf("%s submitted to %s.", taskName, cluster.Name), taskName, cluster.Name, workflow, taskViews, states, ready))
-
-		if err := executor.RunTask(ctx, cluster, task); err != nil {
-			states[clusterIndex].used = states[clusterIndex].used.Sub(task.Resources)
-			view.Status = TaskFailed
+			states[clusterIndex].used = states[clusterIndex].used.Add(task.Resources)
+			cluster := states[clusterIndex].cluster
+			view := taskViews[taskName]
+			view.Status = TaskRunning
+			view.Cluster = cluster.Name
 			taskViews[taskName] = view
-			steps = append(steps, buildSimulationStep(len(steps), "failed", fmt.Sprintf("%s failed on %s: %v", taskName, cluster.Name, err), taskName, cluster.Name, workflow, taskViews, states, ready))
+			steps = append(steps, buildSimulationStep(len(steps), "scheduled", fmt.Sprintf("%s submitted to %s.", taskName, cluster.Name), taskName, cluster.Name, workflow, taskViews, states, blocked))
+
+			running++
+			scheduled = true
+			go runTask(runCtx, executor, clusterIndex, cluster, task, results)
+		}
+		ready = append([]string(nil), blocked...)
+
+		if running == 0 {
+			err := fmt.Errorf("ready tasks cannot fit current cluster resources: %v", ready)
 			return executionFailure(workflow, clusters, steps, err)
 		}
+		if scheduled {
+			ready = sortReadyByCost(ready, g.tasks)
+		}
 
-		states[clusterIndex].used = states[clusterIndex].used.Sub(task.Resources)
+		result := <-results
+		running--
+
+		task := g.tasks[result.taskName]
+		states[result.clusterIndex].used = states[result.clusterIndex].used.Sub(task.Resources)
+		view := taskViews[result.taskName]
+		if result.err != nil {
+			cancel()
+			view.Status = TaskFailed
+			taskViews[result.taskName] = view
+			steps = append(steps, buildSimulationStep(len(steps), "failed", fmt.Sprintf("%s failed on %s: %v", result.taskName, result.cluster.Name, result.err), result.taskName, result.cluster.Name, workflow, taskViews, states, ready))
+			return executionFailure(workflow, clusters, steps, result.err)
+		}
+
 		view.Status = TaskSucceeded
-		taskViews[taskName] = view
+		taskViews[result.taskName] = view
 		completed++
-		steps = append(steps, buildSimulationStep(len(steps), "succeeded", fmt.Sprintf("%s completed on %s.", taskName, cluster.Name), taskName, cluster.Name, workflow, taskViews, states, ready))
+		steps = append(steps, buildSimulationStep(len(steps), "succeeded", fmt.Sprintf("%s completed on %s.", result.taskName, result.cluster.Name), result.taskName, result.cluster.Name, workflow, taskViews, states, ready))
 
-		newReady := g.markCompleted(taskName)
-		sort.Strings(newReady)
+		newReady := g.markCompleted(result.taskName)
+		newReady = sortReadyByCost(newReady, g.tasks)
 		ready = append(ready, newReady...)
-		sort.Strings(ready)
+		ready = sortReadyByCost(ready, g.tasks)
 		for _, readyTask := range newReady {
 			view := taskViews[readyTask]
 			view.Status = TaskReady
@@ -106,6 +133,37 @@ func ExecuteWorkflow(ctx context.Context, workflow Workflow, clusters []Cluster,
 
 	steps = append(steps, buildSimulationStep(len(steps), "finished", "Kubernetes workflow execution finished.", "", "", workflow, taskViews, states, nil))
 	return ExecutionResult{Workflow: workflow, Clusters: clusters, Steps: steps}, nil
+}
+
+type taskExecutionResult struct {
+	taskName     string
+	clusterIndex int
+	cluster      Cluster
+	err          error
+}
+
+func runTask(ctx context.Context, executor Executor, clusterIndex int, cluster Cluster, task TaskSpec, results chan<- taskExecutionResult) {
+	results <- taskExecutionResult{
+		taskName:     task.Name,
+		clusterIndex: clusterIndex,
+		cluster:      cluster,
+		err:          executor.RunTask(ctx, cluster, task),
+	}
+}
+
+func sortReadyByCost(ready []string, tasks map[string]TaskSpec) []string {
+	sorted := append([]string(nil), ready...)
+	sort.Slice(sorted, func(i, j int) bool {
+		left := tasks[sorted[i]]
+		right := tasks[sorted[j]]
+		leftCost := resourceCost(left.Resources)
+		rightCost := resourceCost(right.Resources)
+		if leftCost == rightCost {
+			return left.Name < right.Name
+		}
+		return leftCost > rightCost
+	})
+	return sorted
 }
 
 func executionFailure(workflow Workflow, clusters []Cluster, steps []SimulationStep, err error) (ExecutionResult, error) {

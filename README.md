@@ -16,7 +16,9 @@ The first version focuses on a runnable scheduling core:
 - Parse a workflow definition.
 - Validate DAG dependencies and detect cycles.
 - Track ready, running, completed, and failed tasks.
-- Select a target cluster with enough available resources.
+- Estimate missing task resource cost from task shape, then select a target
+  cluster with enough available resources.
+- Execute independent ready tasks concurrently when cluster resources allow it.
 - Execute tasks through a pluggable executor.
 - Provide a local simulator before connecting to real Kubernetes clusters.
 
@@ -124,9 +126,30 @@ The example cluster config expects these kubeconfig contexts:
 - `kind-dag-a`
 - `kind-dag-b`
 
-Each workflow task is converted to a Kubernetes `batch/v1 Job`. The scheduler
-selects a cluster using the configured logical capacity, applies the Job with
-`kubectl`, waits for completion, and then deletes the Job.
+Each workflow task is converted to a Kubernetes `batch/v1 Job`. Before running,
+the scheduler asks Kubernetes for node allocatable resources and current Pod
+requests, uses that as the available cluster capacity, schedules all ready tasks
+that fit, waits for completion, and then deletes finished Jobs.
+
+## Scheduling Strategy
+
+The current scheduler uses a resource-aware DAG strategy:
+
+- DAG validation detects missing dependencies and cycles.
+- Tasks with no unfinished dependencies enter the ready queue.
+- Missing task CPU or memory is estimated from task name, image, and command.
+  Explicit `resources` in workflow JSON always win.
+- Ready tasks are sorted by estimated resource cost, largest first.
+- A cluster is selected with a best-fit rule: the task must fit the currently
+  available CPU and memory, then the scheduler chooses the cluster with the
+  smallest remaining resource slack.
+- All ready tasks that fit are submitted concurrently. Resources are reserved
+  when a task is submitted and released when its Kubernetes Job finishes.
+
+This is still a heuristic scheduler, not an optimizer. It is designed to show
+real multi-cluster DAG behavior clearly while avoiding obvious waste. Future
+research extensions can add HEFT, Min-Min/Max-Min, deadlines, data locality,
+historical runtime prediction, retries, and queue priorities.
 
 ## Real Cluster Setup
 
@@ -138,6 +161,10 @@ To use the scheduler with someone else's Kubernetes clusters:
 4. Set `namespace` to the namespace where workflow Jobs should run.
 5. Create that namespace in every target cluster.
 6. Grant the kubeconfig identity permission to manage Jobs and read Pods.
+
+For Kubernetes execution, `capacity` in `config/clusters.json` is only a
+fallback and demo value. The scheduler refreshes actual available resources
+from Kubernetes before submitting Jobs.
 
 Minimum namespace-scoped RBAC:
 
@@ -175,11 +202,40 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ```
 
+For actual free-resource estimation, the scheduler also needs to read Nodes and
+Pods across the cluster:
+
+```yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dag-scheduler-resource-reader
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dag-scheduler-resource-reader
+subjects:
+  - kind: User
+    name: replace-with-your-kubeconfig-user
+    apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: dag-scheduler-resource-reader
+  apiGroup: rbac.authorization.k8s.io
+```
+
 Before opening the UI, check access from the same kubeconfig:
 
 ```powershell
 kubectl --context your-prod-east-context -n dag-jobs auth can-i create jobs
 kubectl --context your-prod-east-context -n dag-jobs auth can-i get pods
+kubectl --context your-prod-east-context auth can-i list nodes
+kubectl --context your-prod-east-context auth can-i list pods --all-namespaces
 ```
 
 Then run:
