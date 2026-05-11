@@ -3,6 +3,8 @@
 This project reconstructs an undergraduate thesis topic: a Kubernetes-based
 multi-cluster scheduler for DAG workloads.
 
+![DAG scheduler console](docs/images/scheduler-ui.png)
+
 ## Goal
 
 Build a scheduler that accepts a DAG workflow, tracks task dependencies, chooses
