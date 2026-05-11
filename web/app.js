@@ -15,11 +15,13 @@ const els = {
   stepLabel: document.querySelector("#stepLabel"),
   workflowEditor: document.querySelector("#workflowEditor"),
   runBtn: document.querySelector("#runBtn"),
+  runKubernetesBtn: document.querySelector("#runKubernetesBtn"),
   resetBtn: document.querySelector("#resetBtn"),
   simulateJsonBtn: document.querySelector("#simulateJsonBtn"),
 };
 
 els.runBtn.addEventListener("click", runSimulation);
+els.runKubernetesBtn.addEventListener("click", runKubernetes);
 els.resetBtn.addEventListener("click", resetView);
 els.simulateJsonBtn.addEventListener("click", applyEditor);
 
@@ -40,6 +42,8 @@ async function loadDefaults() {
 
 async function runSimulation() {
   stopTimer();
+  clearEvents();
+  setBusy(true);
   const response = await fetch("/api/simulate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -48,6 +52,7 @@ async function runSimulation() {
   const payload = await response.json();
   if (!response.ok) {
     appendError(payload.error || "simulation failed");
+    setBusy(false);
     return;
   }
 
@@ -58,10 +63,55 @@ async function runSimulation() {
     state.stepIndex += 1;
     if (state.stepIndex >= state.simulation.steps.length) {
       stopTimer();
+      setBusy(false);
       return;
     }
     renderStep(state.simulation.steps[state.stepIndex]);
   }, 900);
+}
+
+async function runKubernetes() {
+  stopTimer();
+  clearEvents();
+  setBusy(true);
+  appendEvent({
+    index: 0,
+    type: "scheduled",
+    message: "Submitting workflow to Kubernetes. This may take a while...",
+  });
+
+  const response = await fetch("/api/kubernetes/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workflow: state.workflow, clusters: state.clusters }),
+  });
+  const payload = await response.json();
+  if (!response.ok && !payload.steps) {
+    appendError(payload.error || "Kubernetes execution failed");
+    setBusy(false);
+    return;
+  }
+
+  state.simulation = payload;
+  state.stepIndex = 0;
+  clearEvents();
+  if (payload.steps?.length) {
+    renderStep(payload.steps[0]);
+    state.timer = window.setInterval(() => {
+      state.stepIndex += 1;
+      if (state.stepIndex >= state.simulation.steps.length) {
+        stopTimer();
+        setBusy(false);
+        if (payload.error) appendError(payload.error);
+        return;
+      }
+      renderStep(state.simulation.steps[state.stepIndex]);
+    }, 650);
+    return;
+  }
+
+  setBusy(false);
+  if (payload.error) appendError(payload.error);
 }
 
 function applyEditor() {
@@ -75,6 +125,8 @@ function applyEditor() {
 
 function resetView() {
   stopTimer();
+  clearEvents();
+  setBusy(false);
   state.simulation = null;
   state.stepIndex = 0;
   const tasks = state.workflow.tasks.map((task) => ({
@@ -225,6 +277,17 @@ function appendError(message) {
   item.textContent = message;
   els.events.prepend(item);
   els.eventCount.textContent = `${els.events.children.length} events`;
+}
+
+function clearEvents() {
+  els.events.innerHTML = "";
+  els.eventCount.textContent = "0 events";
+}
+
+function setBusy(isBusy) {
+  els.runBtn.disabled = isBusy;
+  els.runKubernetesBtn.disabled = isBusy;
+  els.simulateJsonBtn.disabled = isBusy;
 }
 
 function stopTimer() {

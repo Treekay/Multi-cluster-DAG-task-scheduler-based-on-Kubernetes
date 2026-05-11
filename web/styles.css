@@ -48,15 +48,22 @@ button:hover {
   border-color: #a8b5c7;
 }
 
+button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 #runBtn,
-#simulateJsonBtn {
+#simulateJsonBtn,
+#runKubernetesBtn {
   background: var(--accent);
   border-color: var(--accent);
   color: #ffffff;
 }
 
 #runBtn:hover,
-#simulateJsonBtn:hover {
+#simulateJsonBtn:hover,
+#runKubernetesBtn:hover {
   background: var(--accent-strong);
 }
 

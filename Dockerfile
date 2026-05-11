@@ -12,6 +12,8 @@ FROM alpine:3.21
 
 WORKDIR /app
 
+RUN apk add --no-cache ca-certificates kubectl
+
 COPY --from=build /out/dagserver /usr/local/bin/dagserver
 COPY examples ./examples
 COPY web ./web
