@@ -25,6 +25,7 @@ func NewEngine(clusters []Cluster, executor Executor) *Engine {
 }
 
 func (e *Engine) Run(ctx context.Context, workflow Workflow) (WorkflowResult, error) {
+	workflow = NormalizeWorkflowCosts(workflow)
 	g, err := buildGraph(workflow)
 	if err != nil {
 		return WorkflowResult{}, err

@@ -47,6 +47,7 @@ type ClusterView struct {
 }
 
 func Simulate(workflow Workflow, clusters []Cluster) (Simulation, error) {
+	workflow = NormalizeWorkflowCosts(workflow)
 	g, err := buildGraph(workflow)
 	if err != nil {
 		return Simulation{}, err
@@ -83,40 +84,56 @@ func Simulate(workflow Workflow, clusters []Cluster) (Simulation, error) {
 	}
 
 	completed := 0
-	for len(ready) > 0 {
-		sort.Strings(ready)
-		taskName := ready[0]
-		ready = ready[1:]
-		task := g.tasks[taskName]
+	for completed < len(workflow.Tasks) {
+		ready = sortReadyByCost(ready, g.tasks)
+		blocked := ready[:0]
+		scheduled := make([]scheduledSimulationTask, 0, len(ready))
+		for _, taskName := range ready {
+			task := g.tasks[taskName]
+			clusterIndex, err := selectCluster(states, task.Resources)
+			if err != nil {
+				blocked = append(blocked, taskName)
+				continue
+			}
 
-		clusterIndex, err := selectCluster(states, task.Resources)
-		if err != nil {
-			return Simulation{}, fmt.Errorf("task %q: %w", taskName, err)
+			states[clusterIndex].used = states[clusterIndex].used.Add(task.Resources)
+			cluster := states[clusterIndex].cluster
+			view := taskViews[taskName]
+			view.Status = TaskRunning
+			view.Cluster = cluster.Name
+			taskViews[taskName] = view
+			scheduled = append(scheduled, scheduledSimulationTask{
+				taskName:     taskName,
+				clusterIndex: clusterIndex,
+				cluster:      cluster,
+			})
+			steps = append(steps, buildSimulationStep(len(steps), "scheduled", fmt.Sprintf("%s scheduled to %s.", taskName, cluster.Name), taskName, cluster.Name, workflow, taskViews, states, blocked))
+		}
+		ready = append([]string(nil), blocked...)
+
+		if len(scheduled) == 0 {
+			return Simulation{}, fmt.Errorf("ready tasks cannot fit current cluster resources: %v", ready)
 		}
 
-		states[clusterIndex].used = states[clusterIndex].used.Add(task.Resources)
-		cluster := states[clusterIndex].cluster
-		view := taskViews[taskName]
-		view.Status = TaskRunning
-		view.Cluster = cluster.Name
-		taskViews[taskName] = view
-		steps = append(steps, buildSimulationStep(len(steps), "scheduled", fmt.Sprintf("%s scheduled to %s.", taskName, cluster.Name), taskName, cluster.Name, workflow, taskViews, states, ready))
+		for _, scheduledTask := range scheduled {
+			task := g.tasks[scheduledTask.taskName]
+			states[scheduledTask.clusterIndex].used = states[scheduledTask.clusterIndex].used.Sub(task.Resources)
+			view := taskViews[scheduledTask.taskName]
+			view.Status = TaskSucceeded
+			taskViews[scheduledTask.taskName] = view
+			completed++
+			steps = append(steps, buildSimulationStep(len(steps), "succeeded", fmt.Sprintf("%s completed on %s.", scheduledTask.taskName, scheduledTask.cluster.Name), scheduledTask.taskName, scheduledTask.cluster.Name, workflow, taskViews, states, ready))
 
-		states[clusterIndex].used = states[clusterIndex].used.Sub(task.Resources)
-		view.Status = TaskSucceeded
-		taskViews[taskName] = view
-		completed++
-		steps = append(steps, buildSimulationStep(len(steps), "succeeded", fmt.Sprintf("%s completed on %s.", taskName, cluster.Name), taskName, cluster.Name, workflow, taskViews, states, ready))
-
-		newReady := g.markCompleted(taskName)
-		sort.Strings(newReady)
-		ready = append(ready, newReady...)
-		sort.Strings(ready)
-		for _, readyTask := range newReady {
-			view := taskViews[readyTask]
-			view.Status = TaskReady
-			taskViews[readyTask] = view
-			steps = append(steps, buildSimulationStep(len(steps), "ready", fmt.Sprintf("%s is ready to run.", readyTask), readyTask, "", workflow, taskViews, states, ready))
+			newReady := g.markCompleted(scheduledTask.taskName)
+			newReady = sortReadyByCost(newReady, g.tasks)
+			ready = append(ready, newReady...)
+			ready = sortReadyByCost(ready, g.tasks)
+			for _, readyTask := range newReady {
+				view := taskViews[readyTask]
+				view.Status = TaskReady
+				taskViews[readyTask] = view
+				steps = append(steps, buildSimulationStep(len(steps), "ready", fmt.Sprintf("%s is ready to run.", readyTask), readyTask, "", workflow, taskViews, states, ready))
+			}
 		}
 	}
 
@@ -126,6 +143,12 @@ func Simulate(workflow Workflow, clusters []Cluster) (Simulation, error) {
 
 	steps = append(steps, buildSimulationStep(len(steps), "finished", "Workflow simulation finished.", "", "", workflow, taskViews, states, nil))
 	return Simulation{Workflow: workflow, Clusters: clusters, Steps: steps}, nil
+}
+
+type scheduledSimulationTask struct {
+	taskName     string
+	clusterIndex int
+	cluster      Cluster
 }
 
 func buildSimulationStep(index int, eventType, message, task, cluster string, workflow Workflow, taskViews map[string]TaskView, states []clusterState, ready []string) SimulationStep {
@@ -167,16 +190,18 @@ func clusterViews(states []clusterState) []ClusterView {
 
 func selectCluster(states []clusterState, required Resources) (int, error) {
 	bestIndex := -1
-	bestFreeCPU := -1
+	bestRemainingCost := 0
 
 	for i, state := range states {
 		free := state.cluster.Capacity.Sub(state.used)
 		if !free.Fits(required) {
 			continue
 		}
-		if free.CPU > bestFreeCPU {
+		remaining := free.Sub(required)
+		remainingCost := resourceCost(remaining)
+		if bestIndex == -1 || remainingCost < bestRemainingCost {
 			bestIndex = i
-			bestFreeCPU = free.CPU
+			bestRemainingCost = remainingCost
 		}
 	}
 

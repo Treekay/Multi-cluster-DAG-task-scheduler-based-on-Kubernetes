@@ -39,7 +39,26 @@ func main() {
 			fmt.Fprintln(os.Stderr, "kubernetes executor requires -clusters")
 			os.Exit(1)
 		}
+		inspector := scheduler.NewKubernetesResourceInspector()
+		clusters, err = inspector.InspectClusterResources(context.Background(), clusters)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "inspect Kubernetes resources: %v\n", err)
+			os.Exit(1)
+		}
 		executor = scheduler.NewKubernetesExecutor(*taskTimeout)
+		result, err := scheduler.ExecuteWorkflow(context.Background(), workflow, clusters, executor)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "schedule workflow: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("workflow %q finished\n", result.Workflow.Name)
+		for _, step := range result.Steps {
+			if step.Task == "" {
+				continue
+			}
+			fmt.Printf("- %s: %s\n", step.Type, step.Message)
+		}
+		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown executor %q\n", *executorMode)
 		os.Exit(1)

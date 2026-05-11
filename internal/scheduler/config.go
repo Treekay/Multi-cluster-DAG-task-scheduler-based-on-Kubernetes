@@ -33,11 +33,11 @@ func LoadClusterConfig(path string) ([]Cluster, error) {
 		if cluster.Namespace == "" {
 			cluster.Namespace = "default"
 		}
-		if cluster.Capacity.CPU <= 0 {
-			return nil, fmt.Errorf("cluster %q cpu capacity must be positive", cluster.Name)
+		if cluster.Capacity.CPU <= 0 && cluster.Context == "" {
+			return nil, fmt.Errorf("cluster %q cpu capacity must be positive when no kube context is configured", cluster.Name)
 		}
-		if cluster.Capacity.MemoryMiB <= 0 {
-			return nil, fmt.Errorf("cluster %q memory capacity must be positive", cluster.Name)
+		if cluster.Capacity.MemoryMiB <= 0 && cluster.Context == "" {
+			return nil, fmt.Errorf("cluster %q memory capacity must be positive when no kube context is configured", cluster.Name)
 		}
 	}
 
