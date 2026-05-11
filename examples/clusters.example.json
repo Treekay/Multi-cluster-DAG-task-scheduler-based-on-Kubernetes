@@ -1,0 +1,22 @@
+{
+  "clusters": [
+    {
+      "name": "prod-east",
+      "context": "your-prod-east-context",
+      "namespace": "dag-jobs",
+      "capacity": {
+        "cpu": 16,
+        "memoryMiB": 32768
+      }
+    },
+    {
+      "name": "prod-west",
+      "context": "your-prod-west-context",
+      "namespace": "dag-jobs",
+      "capacity": {
+        "cpu": 16,
+        "memoryMiB": 32768
+      }
+    }
+  ]
+}
