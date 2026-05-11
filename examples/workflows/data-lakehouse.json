@@ -1,0 +1,65 @@
+{
+  "name": "data-lakehouse-demo",
+  "tasks": [
+    {
+      "name": "ingest-orders",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo ingest orders; sleep 2"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "ingest-payments",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo ingest payments; sleep 2"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "ingest-users",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo ingest users; sleep 2"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "clean-orders",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo clean orders; sleep 2"],
+      "dependsOn": ["ingest-orders"],
+      "resources": {"cpu": 2, "memoryMiB": 256}
+    },
+    {
+      "name": "clean-payments",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo clean payments; sleep 2"],
+      "dependsOn": ["ingest-payments"],
+      "resources": {"cpu": 2, "memoryMiB": 256}
+    },
+    {
+      "name": "join-facts",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo join facts; sleep 3"],
+      "dependsOn": ["clean-orders", "clean-payments", "ingest-users"],
+      "resources": {"cpu": 3, "memoryMiB": 512}
+    },
+    {
+      "name": "build-features",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo build features; sleep 2"],
+      "dependsOn": ["join-facts"],
+      "resources": {"cpu": 2, "memoryMiB": 512}
+    },
+    {
+      "name": "publish-mart",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo publish mart; sleep 1"],
+      "dependsOn": ["build-features"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "quality-report",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo quality report; sleep 1"],
+      "dependsOn": ["join-facts"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    }
+  ]
+}

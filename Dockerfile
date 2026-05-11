@@ -20,4 +20,4 @@ COPY web ./web
 
 EXPOSE 8080
 
-CMD ["dagserver", "-addr", "0.0.0.0:8080", "-workflow", "examples/workflow.json", "-clusters", "examples/clusters.json", "-web", "web"]
+CMD ["dagserver", "-addr", "0.0.0.0:8080", "-workflow", "examples/workflow.json", "-workflows", "examples/workflows", "-clusters", "examples/clusters.json", "-web", "web"]
