@@ -79,7 +79,9 @@ Then open [http://127.0.0.1:8080](http://127.0.0.1:8080). The container runs
 one Go server that serves both the API and the frontend assets.
 
 Make sure Docker Desktop is running before using Docker Compose. This container
-starts the local visualization and simulation UI; it does not need Kubernetes.
+starts the local visualization and simulation UI. It also includes `kubectl` and
+mounts your local kubeconfig so the `Run Kubernetes` button can submit Jobs to
+the contexts listed in `examples/clusters.json`.
 
 ## Kubernetes Test Setup
 

@@ -158,7 +158,7 @@ func resourceRequirements(resources Resources) map[string]string {
 
 var invalidJobNameCharacters = regexp.MustCompile(`[^a-z0-9-]+`)
 
-func jobName(taskName string) string {
+func JobName(taskName string) string {
 	name := strings.ToLower(taskName)
 	name = invalidJobNameCharacters.ReplaceAllString(name, "-")
 	name = strings.Trim(name, "-")
@@ -170,6 +170,10 @@ func jobName(taskName string) string {
 		name = strings.TrimRight(name[:63], "-")
 	}
 	return name
+}
+
+func jobName(taskName string) string {
+	return JobName(taskName)
 }
 
 func formatKubectlTimeout(timeout time.Duration) string {
