@@ -1,9 +1,21 @@
 const state = {
   workflow: null,
   clusters: [],
+  examples: [],
   simulation: null,
   stepIndex: 0,
   timer: null,
+  dagView: {
+    x: 0,
+    y: 0,
+    width: 1000,
+    height: 560,
+    contentWidth: 1000,
+    contentHeight: 560,
+    key: "",
+    dragging: false,
+    dragStart: null,
+  },
 };
 
 const els = {
@@ -14,6 +26,10 @@ const els = {
   eventCount: document.querySelector("#eventCount"),
   stepLabel: document.querySelector("#stepLabel"),
   workflowEditor: document.querySelector("#workflowEditor"),
+  workflowSelect: document.querySelector("#workflowSelect"),
+  zoomOutBtn: document.querySelector("#zoomOutBtn"),
+  zoomResetBtn: document.querySelector("#zoomResetBtn"),
+  zoomInBtn: document.querySelector("#zoomInBtn"),
   runBtn: document.querySelector("#runBtn"),
   runKubernetesBtn: document.querySelector("#runKubernetesBtn"),
   resetBtn: document.querySelector("#resetBtn"),
@@ -24,6 +40,15 @@ els.runBtn.addEventListener("click", runSimulation);
 els.runKubernetesBtn.addEventListener("click", runKubernetes);
 els.resetBtn.addEventListener("click", resetView);
 els.simulateJsonBtn.addEventListener("click", applyEditor);
+els.workflowSelect.addEventListener("change", selectWorkflowExample);
+els.zoomOutBtn.addEventListener("click", () => zoomDag(1.2));
+els.zoomInBtn.addEventListener("click", () => zoomDag(0.8));
+els.zoomResetBtn.addEventListener("click", resetDagViewport);
+els.dagCanvas.addEventListener("wheel", handleDagWheel, { passive: false });
+els.dagCanvas.addEventListener("pointerdown", startDagPan);
+window.addEventListener("pointermove", moveDagPan);
+window.addEventListener("pointerup", stopDagPan);
+els.dagCanvas.addEventListener("dblclick", resetDagViewport);
 
 loadDefaults();
 
@@ -36,6 +61,8 @@ async function loadDefaults() {
 
   state.workflow = payload.workflow;
   state.clusters = payload.clusters;
+  state.examples = payload.examples || [];
+  renderWorkflowOptions();
   els.workflowEditor.value = JSON.stringify(state.workflow, null, 2);
   resetView();
 }
@@ -117,10 +144,28 @@ async function runKubernetes() {
 function applyEditor() {
   try {
     state.workflow = JSON.parse(els.workflowEditor.value);
+    els.workflowSelect.value = "";
     resetView();
   } catch (error) {
     appendError(`Invalid workflow JSON: ${error.message}`);
   }
+}
+
+function selectWorkflowExample() {
+  const selected = state.examples.find((example) => example.path === els.workflowSelect.value);
+  if (!selected) return;
+  state.workflow = structuredClone(selected.workflow);
+  els.workflowEditor.value = JSON.stringify(state.workflow, null, 2);
+  resetView();
+}
+
+function renderWorkflowOptions() {
+  els.workflowSelect.innerHTML = [
+    '<option value="">Custom JSON</option>',
+    ...state.examples.map((example) => `<option value="${escapeHtml(example.path)}">${escapeHtml(example.name)}</option>`),
+  ].join("");
+  const active = state.examples.find((example) => example.workflow.name === state.workflow.name);
+  if (active) els.workflowSelect.value = active.path;
 }
 
 function resetView() {
@@ -168,6 +213,7 @@ function render(step) {
 
 function renderDag(tasks) {
   const layout = computeLayout(tasks);
+  syncDagViewport(layout, tasks);
   const edges = [];
   for (const task of tasks) {
     for (const dependency of task.dependsOn || []) {
@@ -180,10 +226,10 @@ function renderDag(tasks) {
       const from = layout.positions.get(edge.from);
       const to = layout.positions.get(edge.to);
       if (!from || !to) return "";
-      const startX = from.x + 92;
-      const startY = from.y + 44;
-      const endX = to.x - 92;
-      const endY = to.y + 44;
+      const startX = from.x + layout.nodeWidth;
+      const startY = from.y + layout.nodeHeight / 2;
+      const endX = to.x;
+      const endY = to.y + layout.nodeHeight / 2;
       const midX = (startX + endX) / 2;
       return `<path class="edge" d="M ${startX} ${startY} C ${midX} ${startY}, ${midX} ${endY}, ${endX} ${endY}" />`;
     })
@@ -194,19 +240,29 @@ function renderDag(tasks) {
       const pos = layout.positions.get(task.name);
       const cluster = task.cluster ? ` on ${task.cluster}` : "";
       return `
-        <g class="node ${task.status}" transform="translate(${pos.x - 92}, ${pos.y})">
-          <rect width="184" height="88" rx="8"></rect>
-          <text class="node-title" x="18" y="30">${escapeHtml(task.name)}</text>
+        <g class="node ${task.status}" transform="translate(${pos.x}, ${pos.y})">
+          <rect width="${layout.nodeWidth}" height="${layout.nodeHeight}" rx="8"></rect>
+          <text class="node-title" x="18" y="30">
+            <title>${escapeHtml(task.name)}</title>
+            ${escapeHtml(compactTaskName(task.name))}
+          </text>
           <text class="node-meta" x="18" y="54">${task.cpu} CPU · ${task.memoryMiB} MiB</text>
           <text class="node-status ${task.status}" x="18" y="74">${task.status}${escapeHtml(cluster)}</text>
         </g>`;
     })
     .join("");
 
-  els.dagCanvas.innerHTML = `${edgeMarkup}${nodeMarkup}`;
+  els.dagCanvas.innerHTML = `<rect class="dag-background" x="0" y="0" width="${layout.width}" height="${layout.height}"></rect>${edgeMarkup}${nodeMarkup}`;
+  applyDagViewport();
 }
 
 function computeLayout(tasks) {
+  const nodeWidth = 236;
+  const nodeHeight = 88;
+  const marginX = 80;
+  const marginY = 64;
+  const columnGap = 90;
+  const rowGap = 72;
   const byName = new Map(tasks.map((task) => [task.name, task]));
   const depthMemo = new Map();
   function depth(name) {
@@ -226,19 +282,134 @@ function computeLayout(tasks) {
   }
 
   const positions = new Map();
-  const maxDepth = Math.max(...Array.from(layers.keys()), 0);
-  const xGap = maxDepth === 0 ? 0 : 760 / maxDepth;
-  for (const [layer, layerTasks] of layers.entries()) {
-    const yGap = 420 / Math.max(layerTasks.length, 1);
+  const orderedLayers = Array.from(layers.entries()).sort(([a], [b]) => a - b);
+  const maxLayerSize = Math.max(...orderedLayers.map(([, layerTasks]) => layerTasks.length), 1);
+  const width = Math.max(1000, marginX * 2 + orderedLayers.length * nodeWidth + Math.max(0, orderedLayers.length - 1) * columnGap);
+  const height = Math.max(560, marginY * 2 + maxLayerSize * nodeHeight + Math.max(0, maxLayerSize - 1) * rowGap);
+
+  for (const [layer, layerTasks] of orderedLayers) {
+    const layerHeight = layerTasks.length * nodeHeight + Math.max(0, layerTasks.length - 1) * rowGap;
+    const startY = marginY + (height - marginY * 2 - layerHeight) / 2;
     layerTasks.forEach((task, index) => {
       positions.set(task.name, {
-        x: 120 + layer * xGap,
-        y: 78 + index * yGap,
+        x: marginX + layer * (nodeWidth + columnGap),
+        y: startY + index * (nodeHeight + rowGap),
       });
     });
   }
 
-  return { positions };
+  return { positions, width, height, nodeWidth, nodeHeight };
+}
+
+function compactTaskName(name) {
+  if (name.length <= 18) return name;
+  return `${name.slice(0, 16)}...`;
+}
+
+function syncDagViewport(layout, tasks) {
+  const key = `${layout.width}x${layout.height}:${tasks.map((task) => task.name).join("|")}`;
+  state.dagView.contentWidth = layout.width;
+  state.dagView.contentHeight = layout.height;
+  if (state.dagView.key !== key) {
+    state.dagView.key = key;
+    resetDagViewport();
+  }
+}
+
+function resetDagViewport() {
+  const panel = els.dagCanvas.getBoundingClientRect();
+  const panelRatio = panel.width / Math.max(panel.height, 1);
+  const contentRatio = state.dagView.contentWidth / Math.max(state.dagView.contentHeight, 1);
+
+  if (panelRatio > contentRatio) {
+    state.dagView.height = state.dagView.contentHeight;
+    state.dagView.width = state.dagView.height * panelRatio;
+  } else {
+    state.dagView.width = state.dagView.contentWidth;
+    state.dagView.height = state.dagView.width / Math.max(panelRatio, 0.1);
+  }
+
+  state.dagView.x = (state.dagView.contentWidth - state.dagView.width) / 2;
+  state.dagView.y = (state.dagView.contentHeight - state.dagView.height) / 2;
+  applyDagViewport();
+}
+
+function applyDagViewport() {
+  clampDagViewport();
+  els.dagCanvas.setAttribute(
+    "viewBox",
+    `${state.dagView.x} ${state.dagView.y} ${state.dagView.width} ${state.dagView.height}`,
+  );
+}
+
+function clampDagViewport() {
+  const maxWidth = state.dagView.contentWidth * 1.25;
+  const maxHeight = state.dagView.contentHeight * 1.25;
+  const minWidth = Math.max(320, state.dagView.contentWidth * 0.2);
+  const minHeight = Math.max(220, state.dagView.contentHeight * 0.2);
+  state.dagView.width = Math.min(maxWidth, Math.max(minWidth, state.dagView.width));
+  state.dagView.height = Math.min(maxHeight, Math.max(minHeight, state.dagView.height));
+
+  if (state.dagView.width >= state.dagView.contentWidth) {
+    state.dagView.x = (state.dagView.contentWidth - state.dagView.width) / 2;
+  } else {
+    state.dagView.x = Math.min(Math.max(0, state.dagView.x), state.dagView.contentWidth - state.dagView.width);
+  }
+  if (state.dagView.height >= state.dagView.contentHeight) {
+    state.dagView.y = (state.dagView.contentHeight - state.dagView.height) / 2;
+  } else {
+    state.dagView.y = Math.min(Math.max(0, state.dagView.y), state.dagView.contentHeight - state.dagView.height);
+  }
+}
+
+function zoomDag(scale, clientPoint) {
+  const rect = els.dagCanvas.getBoundingClientRect();
+  const point = clientPoint || { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  const localX = (point.x - rect.left) / Math.max(rect.width, 1);
+  const localY = (point.y - rect.top) / Math.max(rect.height, 1);
+  const focusX = state.dagView.x + localX * state.dagView.width;
+  const focusY = state.dagView.y + localY * state.dagView.height;
+  const nextWidth = state.dagView.width * scale;
+  const nextHeight = state.dagView.height * scale;
+  state.dagView.x = focusX - localX * nextWidth;
+  state.dagView.y = focusY - localY * nextHeight;
+  state.dagView.width = nextWidth;
+  state.dagView.height = nextHeight;
+  applyDagViewport();
+}
+
+function handleDagWheel(event) {
+  event.preventDefault();
+  zoomDag(event.deltaY > 0 ? 1.12 : 0.88, { x: event.clientX, y: event.clientY });
+}
+
+function startDagPan(event) {
+  if (event.button !== 0 || event.target.closest(".node")) return;
+  state.dagView.dragging = true;
+  state.dagView.dragStart = {
+    clientX: event.clientX,
+    clientY: event.clientY,
+    x: state.dagView.x,
+    y: state.dagView.y,
+  };
+  els.dagCanvas.setPointerCapture(event.pointerId);
+  els.dagCanvas.classList.add("is-panning");
+}
+
+function moveDagPan(event) {
+  if (!state.dagView.dragging || !state.dagView.dragStart) return;
+  const rect = els.dagCanvas.getBoundingClientRect();
+  const dx = ((event.clientX - state.dagView.dragStart.clientX) / Math.max(rect.width, 1)) * state.dagView.width;
+  const dy = ((event.clientY - state.dagView.dragStart.clientY) / Math.max(rect.height, 1)) * state.dagView.height;
+  state.dagView.x = state.dagView.dragStart.x - dx;
+  state.dagView.y = state.dagView.dragStart.y - dy;
+  applyDagViewport();
+}
+
+function stopDagPan() {
+  state.dagView.dragging = false;
+  state.dagView.dragStart = null;
+  els.dagCanvas.classList.remove("is-panning");
 }
 
 function renderClusters(clusters) {

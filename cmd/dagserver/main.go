@@ -17,18 +17,26 @@ import (
 type defaultPayload struct {
 	Workflow scheduler.Workflow  `json:"workflow"`
 	Clusters []scheduler.Cluster `json:"clusters"`
+	Examples []workflowExample   `json:"examples"`
+}
+
+type workflowExample struct {
+	Name     string             `json:"name"`
+	Path     string             `json:"path"`
+	Workflow scheduler.Workflow `json:"workflow"`
 }
 
 func main() {
 	addr := flag.String("addr", "127.0.0.1:8080", "HTTP listen address")
 	workflowPath := flag.String("workflow", "examples/workflow.json", "default workflow JSON")
+	workflowsDir := flag.String("workflows", "examples/workflows", "directory containing workflow examples")
 	clustersPath := flag.String("clusters", "examples/clusters.json", "default cluster config JSON")
 	kubernetesTaskTimeout := flag.Duration("kubernetes-task-timeout", 10*time.Minute, "timeout for each Kubernetes Job")
 	webDir := flag.String("web", "web", "web asset directory")
 	flag.Parse()
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/default", defaultHandler(*workflowPath, *clustersPath))
+	mux.HandleFunc("/api/default", defaultHandler(*workflowPath, *workflowsDir, *clustersPath))
 	mux.HandleFunc("/api/simulate", simulateHandler)
 	mux.HandleFunc("/api/kubernetes/run", kubernetesRunHandler(*kubernetesTaskTimeout))
 	mux.Handle("/", http.FileServer(http.Dir(*webDir)))
@@ -39,7 +47,7 @@ func main() {
 	}
 }
 
-func defaultHandler(workflowPath, clustersPath string) http.HandlerFunc {
+func defaultHandler(workflowPath, workflowsDir, clustersPath string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -56,8 +64,13 @@ func defaultHandler(workflowPath, clustersPath string) http.HandlerFunc {
 			writeError(w, fmt.Errorf("load clusters: %w", err), http.StatusInternalServerError)
 			return
 		}
+		examples, err := loadWorkflowExamples(workflowPath, workflowsDir)
+		if err != nil {
+			writeError(w, fmt.Errorf("load workflow examples: %w", err), http.StatusInternalServerError)
+			return
+		}
 
-		writeJSON(w, defaultPayload{Workflow: workflow, Clusters: clusters})
+		writeJSON(w, defaultPayload{Workflow: workflow, Clusters: clusters, Examples: examples})
 	}
 }
 
@@ -123,6 +136,51 @@ func loadWorkflow(path string) (scheduler.Workflow, error) {
 	}
 
 	return workflow, nil
+}
+
+func loadWorkflowExamples(defaultPath, workflowsDir string) ([]workflowExample, error) {
+	examples := []workflowExample{}
+	seen := map[string]struct{}{}
+
+	addExample := func(path string) error {
+		cleanPath := filepath.Clean(path)
+		if _, ok := seen[cleanPath]; ok {
+			return nil
+		}
+		workflow, err := loadWorkflow(cleanPath)
+		if err != nil {
+			return err
+		}
+		examples = append(examples, workflowExample{
+			Name:     workflow.Name,
+			Path:     cleanPath,
+			Workflow: workflow,
+		})
+		seen[cleanPath] = struct{}{}
+		return nil
+	}
+
+	if err := addExample(defaultPath); err != nil {
+		return nil, err
+	}
+
+	entries, err := os.ReadDir(filepath.Clean(workflowsDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return examples, nil
+		}
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		if err := addExample(filepath.Join(workflowsDir, entry.Name())); err != nil {
+			return nil, err
+		}
+	}
+
+	return examples, nil
 }
 
 func writeJSON(w http.ResponseWriter, value any) {

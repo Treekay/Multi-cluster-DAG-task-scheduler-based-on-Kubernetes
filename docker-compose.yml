@@ -6,7 +6,16 @@ services:
     ports:
       - "8080:8080"
     environment:
-      KUBECONFIG: /kube/config
+      KUBECONFIG: /tmp/kube/config
     volumes:
       - ${USERPROFILE}/.kube:/kube:ro
+    command:
+      - sh
+      - -c
+      - |
+        mkdir -p /tmp/kube
+        sed 's/127\.0\.0\.1/host.docker.internal/g' /kube/config > /tmp/kube/config
+        kubectl config set-cluster kind-dag-a --insecure-skip-tls-verify=true --kubeconfig /tmp/kube/config >/dev/null 2>&1 || true
+        kubectl config set-cluster kind-dag-b --insecure-skip-tls-verify=true --kubeconfig /tmp/kube/config >/dev/null 2>&1 || true
+        exec dagserver -addr 0.0.0.0:8080 -workflow examples/workflow.json -workflows examples/workflows -clusters examples/clusters.json -web web
     restart: unless-stopped

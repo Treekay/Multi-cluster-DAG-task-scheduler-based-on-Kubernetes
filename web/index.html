@@ -15,6 +15,10 @@
             <p id="workflowName">Loading workflow</p>
           </div>
           <div class="actions">
+            <label class="workflow-picker">
+              <span>Workflow</span>
+              <select id="workflowSelect"></select>
+            </label>
             <button id="resetBtn" type="button">Reset</button>
             <button id="runBtn" type="button">Run Simulation</button>
             <button id="runKubernetesBtn" type="button">Run Kubernetes</button>
@@ -22,6 +26,11 @@
         </header>
 
         <section class="canvas-panel" aria-label="DAG visualization">
+          <div class="dag-tools" aria-label="DAG viewport controls">
+            <button id="zoomOutBtn" type="button" title="Zoom out">-</button>
+            <button id="zoomResetBtn" type="button" title="Reset view">Reset</button>
+            <button id="zoomInBtn" type="button" title="Zoom in">+</button>
+          </div>
           <svg id="dagCanvas" viewBox="0 0 1000 560" role="img" aria-label="Workflow DAG"></svg>
         </section>
 

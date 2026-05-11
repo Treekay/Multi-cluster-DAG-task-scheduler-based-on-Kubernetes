@@ -68,6 +68,10 @@ go run ./cmd/dagserver
 
 Then open [http://127.0.0.1:8080](http://127.0.0.1:8080). The console shows
 the DAG, cluster resource usage, and the simulated scheduling event stream.
+Use the workflow selector to switch between the built-in demo DAGs. `Run
+Simulation` stays local and does not touch Kubernetes. `Run Kubernetes` submits
+each DAG task as a real Kubernetes `Job` that runs a lightweight `busybox`
+command.
 
 Run the visualization console with Docker:
 
@@ -82,6 +86,13 @@ Make sure Docker Desktop is running before using Docker Compose. This container
 starts the local visualization and simulation UI. It also includes `kubectl` and
 mounts your local kubeconfig so the `Run Kubernetes` button can submit Jobs to
 the contexts listed in `examples/clusters.json`.
+
+Demo workflows live in:
+
+- `examples/workflow.json`
+- `examples/workflows/data-lakehouse.json`
+- `examples/workflows/ml-training.json`
+- `examples/workflows/video-analytics.json`
 
 ## Kubernetes Test Setup
 

@@ -1,0 +1,53 @@
+{
+  "name": "video-analytics-demo",
+  "tasks": [
+    {
+      "name": "split-video",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo split video; sleep 2"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "extract-audio",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo extract audio; sleep 2"],
+      "dependsOn": ["split-video"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "detect-scenes",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo detect scenes; sleep 2"],
+      "dependsOn": ["split-video"],
+      "resources": {"cpu": 2, "memoryMiB": 256}
+    },
+    {
+      "name": "transcribe-audio",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo transcribe audio; sleep 2"],
+      "dependsOn": ["extract-audio"],
+      "resources": {"cpu": 2, "memoryMiB": 256}
+    },
+    {
+      "name": "classify-scenes",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo classify scenes; sleep 3"],
+      "dependsOn": ["detect-scenes"],
+      "resources": {"cpu": 3, "memoryMiB": 512}
+    },
+    {
+      "name": "merge-metadata",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo merge metadata; sleep 1"],
+      "dependsOn": ["transcribe-audio", "classify-scenes"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "publish-index",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo publish index; sleep 1"],
+      "dependsOn": ["merge-metadata"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    }
+  ]
+}

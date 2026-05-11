@@ -1,0 +1,60 @@
+{
+  "name": "ml-training-demo",
+  "tasks": [
+    {
+      "name": "fetch-dataset",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo fetch dataset; sleep 2"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "validate-schema",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo validate schema; sleep 1"],
+      "dependsOn": ["fetch-dataset"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    },
+    {
+      "name": "feature-extract-a",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo feature extract a; sleep 2"],
+      "dependsOn": ["validate-schema"],
+      "resources": {"cpu": 2, "memoryMiB": 256}
+    },
+    {
+      "name": "feature-extract-b",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo feature extract b; sleep 2"],
+      "dependsOn": ["validate-schema"],
+      "resources": {"cpu": 2, "memoryMiB": 256}
+    },
+    {
+      "name": "train-rank-model",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo train rank model; sleep 3"],
+      "dependsOn": ["feature-extract-a"],
+      "resources": {"cpu": 4, "memoryMiB": 1024}
+    },
+    {
+      "name": "train-risk-model",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo train risk model; sleep 3"],
+      "dependsOn": ["feature-extract-b"],
+      "resources": {"cpu": 4, "memoryMiB": 1024}
+    },
+    {
+      "name": "evaluate-models",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo evaluate models; sleep 2"],
+      "dependsOn": ["train-rank-model", "train-risk-model"],
+      "resources": {"cpu": 2, "memoryMiB": 512}
+    },
+    {
+      "name": "package-artifacts",
+      "image": "busybox:1.36",
+      "command": ["sh", "-c", "echo package artifacts; sleep 1"],
+      "dependsOn": ["evaluate-models"],
+      "resources": {"cpu": 1, "memoryMiB": 128}
+    }
+  ]
+}
